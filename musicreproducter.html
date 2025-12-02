@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mi Bóveda MP3</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        /* --- ESTILOS (DISEÑO) --- */
+        :root {
+            --bg: #121212;
+            --card: #1e1e1e;
+            --accent: #1db954; /* Verde Spotify */
+            --text: #ffffff;
+            --text-sec: #b3b3b3;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+        }
+
+        /* Cabecera */
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(180deg, #2a2a2a 0%, var(--bg) 100%);
+            border-radius: 20px;
+        }
+
+        h1 { font-size: 2rem; margin-bottom: 5px; }
+        p { color: var(--text-sec); }
+
+        /* Reproductor Principal (Sticky) */
+        .player-card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 30px;
+            position: sticky;
+            top: 10px;
+            z-index: 100;
+            border: 1px solid #333;
+        }
+
+        .now-playing-info {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+        .now-playing-title { font-size: 1.2rem; font-weight: bold; color: var(--accent); }
+        .now-playing-artist { font-size: 0.9rem; color: var(--text-sec); }
+
+        audio {
+            width: 100%;
+            outline: none;
+            filter: invert(0.9) hue-rotate(180deg); /* Truco para hacerlo oscuro */
+        }
+
+        /* Área de Carga (Upload) */
+        .upload-area {
+            border: 2px dashed #444;
+            padding: 30px;
+            text-align: center;
+            border-radius: 15px;
+            cursor: pointer;
+            transition: 0.3s;
+            background: #181818;
+            margin-bottom: 30px;
+        }
+
+        .upload-area:hover { border-color: var(--accent); background: #222; }
+        .upload-icon { font-size: 2rem; color: var(--text-sec); margin-bottom: 10px; }
+        
+        /* Input invisible */
+        #file-input { display: none; }
+
+        /* Lista de Canciones */
+        .song-list { list-style: none; }
+
+        .song-item {
+            background: var(--card);
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: 0.2s;
+            cursor: pointer;
+        }
+
+        .song-item:hover { background: #2a2a2a; transform: translateX(5px); }
+        
+        /* Canción activa */
+        .song-item.active {
+            border-left: 4px solid var(--accent);
+            background: #252525;
+        }
+
+        .song-details h4 { margin-bottom: 4px; font-size: 1rem; }
+        .song-details span { font-size: 0.8rem; color: var(--text-sec); }
+
+        .delete-btn {
+            background: transparent;
+            border: none;
+            color: #ef4444;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 1rem;
+            opacity: 0.7;
+            transition: 0.2s;
+        }
+        .delete-btn:hover { opacity: 1; transform: scale(1.1); }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-compact-disc"></i> Bóveda MP3</h1>
+            <p>Tus archivos, tu música. Sin límites.</p>
+        </header>
+
+        <div class="player-card">
+            <div class="now-playing-info">
+                <div class="now-playing-title" id="current-title">Selecciona una canción</div>
+                <div class="now-playing-artist" id="current-status">Esperando...</div>
+            </div>
+            <audio id="audio-player" controls></audio>
+        </div>
+
+        <div class="upload-area" onclick="document.getElementById('file-input').click()">
+            <i class="fas fa-cloud-upload-alt upload-icon"></i>
+            <h3>Sube tus MP3 aquí</h3>
+            <p>Click para buscar en tu carpeta</p>
+            <input type="file" id="file-input" accept="audio/mp3, audio/wav, audio/mpeg">
+        </div>
+
+        <h3 style="margin-bottom: 15px; color: var(--text-sec);">Tu Biblioteca</h3>
+        <ul class="song-list" id="playlist">
+            </ul>
+    </div>
+
+    <script>
+        /* --- LÓGICA JAVASCRIPT --- */
+        
+        // Configuración de Base de Datos (IndexedDB) para guardar archivos grandes
+        const dbName = "MusicVaultDB";
+        let db;
+
+        const request = indexedDB.open(dbName, 1);
+
+        request.onerror = (event) => console.error("Error BD:", event);
+        
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            // Crear almacén de objetos para canciones
+            const objectStore = db.createObjectStore("songs", { keyPath: "id", autoIncrement: true });
+            objectStore.createIndex("name", "name", { unique: false });
+        };
+
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            loadSongs(); // Cargar lista al iniciar
+        };
+
+        // Elementos del DOM
+        const fileInput = document.getElementById('file-input');
+        const playlist = document.getElementById('playlist');
+        const audioPlayer = document.getElementById('audio-player');
+        const currentTitle = document.getElementById('current-title');
+        const currentStatus = document.getElementById('current-status');
+
+        // 1. SUBIR CANCIÓN
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            currentStatus.innerText = "Guardando archivo...";
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const arrayBuffer = e.target.result;
+                const blob = new Blob([arrayBuffer], { type: file.type });
+
+                const transaction = db.transaction(["songs"], "readwrite");
+                const store = transaction.objectStore("songs");
+
+                const song = {
+                    name: file.name.replace('.mp3', ''),
+                    date: new Date(),
+                    audioBlob: blob // ¡Guardamos el archivo entero!
+                };
+
+                const addRequest = store.add(song);
+
+                addRequest.onsuccess = () => {
+                    currentStatus.innerText = "Guardado con éxito";
+                    loadSongs(); // Recargar lista
+                };
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // 2. CARGAR LISTA DE CANCIONES
+        function loadSongs() {
+            playlist.innerHTML = ''; // Limpiar
+            const transaction = db.transaction(["songs"], "readonly");
+            const store = transaction.objectStore("songs");
+
+            store.openCursor().onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    renderSongItem(cursor.value);
+                    cursor.continue();
+                }
+            };
+        }
+
+        // 3. DIBUJAR CANCIÓN EN HTML
+        function renderSongItem(song) {
+            const li = document.createElement('li');
+            li.className = 'song-item';
+            li.onclick = (e) => {
+                // Evitar que se reproduzca si clickeamos en borrar
+                if(e.target.closest('.delete-btn')) return;
+                playSong(song.id, song.name);
+                
+                // Efecto visual de activo
+                document.querySelectorAll('.song-item').forEach(el => el.classList.remove('active'));
+                li.classList.add('active');
+            };
+
+            li.innerHTML = `
+                <div class="song-details">
+                    <h4><i class="fas fa-music"></i> ${song.name}</h4>
+                    <span>MP3 Local</span>
+                </div>
+                <button class="delete-btn" onclick="deleteSong(${song.id})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            `;
+            playlist.prepend(li); // Nuevas arriba
+        }
+
+        // 4. REPRODUCIR (La magia de Blob URL)
+        function playSong(id, name) {
+            const transaction = db.transaction(["songs"], "readonly");
+            const store = transaction.objectStore("songs");
+            const request = store.get(id);
+
+            request.onsuccess = () => {
+                const song = request.result;
+                // Crear una URL temporal interna para el archivo de audio
+                const audioUrl = URL.createObjectURL(song.audioBlob);
+                
+                audioPlayer.src = audioUrl;
+                audioPlayer.play();
+                
+                currentTitle.innerText = name;
+                currentStatus.innerText = "Reproduciendo...";
+            };
+        }
+
+        // 5. BORRAR CANCIÓN
+        window.deleteSong = function(id) {
+            if(!confirm("¿Borrar esta canción de la bóveda?")) return;
+
+            const transaction = db.transaction(["songs"], "readwrite");
+            const store = transaction.objectStore("songs");
+            store.delete(id);
+
+            transaction.oncomplete = () => {
+                loadSongs(); // Recargar lista
+                // Si la canción borrada es la que suena, detener
+                currentStatus.innerText = "Eliminado";
+            };
+        };
+
+    </script>
+</body>
+</html>
